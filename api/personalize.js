@@ -4,7 +4,7 @@
 //   GEMINI_API_KEY (gratuit, Google AI Studio), MISTRAL_API_KEY (gratuit, Mistral), ANTHROPIC_API_KEY (payant).
 // Facultatif : AI_PROVIDER (gemini, mistral ou anthropic), GEMINI_MODEL, MISTRAL_MODEL, ANTHROPIC_MODEL.
 // Réservée aux comptes connectés, et à une partie créée il y a moins de 20 minutes par ce compte.
-
+ 
 const BASE = process.env.SUPABASE_URL;
 const SKEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const E = process.env;
@@ -13,26 +13,26 @@ const KEYS = { gemini: E.GEMINI_API_KEY, mistral: E.MISTRAL_API_KEY, anthropic: 
 const MODELS = { gemini: E.GEMINI_MODEL || "gemini-2.5-flash", mistral: E.MISTRAL_MODEL || "mistral-small-latest", anthropic: E.ANTHROPIC_MODEL || "claude-sonnet-5-5" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const WINDOW_MIN = 20;
-
+ 
 const KIND = {
   club: "un club sportif (vestiaire, staff, direction, bénévoles, supporters, partenaires locaux)",
   entreprise: "une équipe en entreprise (dirigeant, responsable RH, managers, chefs de projet, clients, collaborateurs)",
 };
-
+ 
 async function sb(path, headers = {}) {
   const r = await fetch(BASE + path, { headers: { apikey: SKEY, ...(SKEY.startsWith("sb_") ? {} : { Authorization: "Bearer " + SKEY }), ...headers } });
   const t = await r.text();
   let d = null; try { d = t ? JSON.parse(t) : null; } catch (e) { d = t; }
   return { ok: r.ok, data: d };
 }
-
+ 
 const clean = (s, max) => {
   if (typeof s !== "string") return null;
   s = s.replace(/[<>]/g, "").replace(/\s*[—–]\s*/g, ", ").replace(/\s+/g, " ").trim();
   return s.length && s.length <= max ? s : null;
 };
 const str = (s, max) => (typeof s === "string" ? s.replace(/[<>\u0000-\u001f]/g, " ").trim().slice(0, max) : "");
-
+ 
 function prompt(kind, b) {
   const sys = [
     "Tu adaptes les textes d'un jeu de simulation pédagogique de préparation mentale à la réalité d'un groupe : " + KIND[kind] + ".",
@@ -57,7 +57,7 @@ function prompt(kind, b) {
   });
   return { sys, user };
 }
-
+ 
 async function generate(provider, sys, user, ms) {
   const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), ms || 55000);
   const key = KEYS[provider], model = MODELS[provider];
@@ -104,7 +104,7 @@ async function generate(provider, sys, user, ms) {
     return (j.content || []).map((c) => c.text || "").join("");
   } finally { clearTimeout(to); }
 }
-
+ 
 module.exports = async (req, res) => {
   const send = (c, o) => res.status(c).json(o);
   if (req.method === "GET") {
@@ -121,32 +121,47 @@ module.exports = async (req, res) => {
         else out.modeles_flash = (lj.models || []).map((x) => String(x.name).replace(/^models\//, "")).filter((n) => /flash/i.test(n)).slice(0, 8);
       } catch (e) { out.liste_modeles = (e && e.name) || "erreur"; }
     }
+    if (PROVIDER === "gemini") {
+      const essai = async (m, avecJson, avecThink) => {
+        const t0 = Date.now(), c = new AbortController(), t = setTimeout(() => c.abort(), 15000);
+        try {
+          const gc = { maxOutputTokens: 200 };
+          if (avecJson) gc.responseMimeType = "application/json";
+          if (avecThink) gc.thinkingConfig = { thinkingBudget: 0 };
+          const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + m + ":generateContent", { method: "POST", signal: c.signal, headers: { "x-goog-api-key": KEYS.gemini, "content-type": "application/json" }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Dis bonjour en un mot." }] }], generationConfig: gc }) });
+          const j = await r.json().catch(() => ({}));
+          return { m, json: avecJson, think: avecThink, statut: r.status, ms: Date.now() - t0, msg: r.ok ? undefined : String((j.error && j.error.message) || "").slice(0, 120) };
+        } catch (e) { return { m, json: avecJson, think: avecThink, statut: (e && e.name) || "erreur", ms: Date.now() - t0 }; } finally { clearTimeout(t); }
+      };
+      out.essais = await Promise.all([essai("gemini-2.5-flash", false, false), essai("gemini-2.5-flash", true, true), essai("gemini-2.5-flash-lite", false, false), essai("gemini-flash-latest", false, false)]);
+      return send(200, out);
+    }
     try { await generate(PROVIDER, "Réponds par {\"ok\":true}", "test", 20000); out.test = "ok"; }
     catch (e) { out.test = "echec"; out.code = (e && e.status) || (e && e.name) || "?"; }
     return send(200, out);
   }
   if (req.method !== "POST") return send(405, { error: "Méthode non autorisée" });
   if (!BASE || !SKEY || !PROVIDER || !KEYS[PROVIDER]) return send(500, { error: "Configuration serveur incomplète" });
-
+ 
   const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
   if (!token) return send(401, { error: "Connexion requise" });
   const who = await fetch(BASE + "/auth/v1/user", { headers: { apikey: SKEY, Authorization: "Bearer " + token } });
   if (!who.ok) return send(401, { error: "Session invalide" });
   const me = await who.json();
-
+ 
   let b = req.body;
   if (typeof b === "string") { try { b = JSON.parse(b); } catch (e) { b = {}; } }
   b = b || {};
   const kind = b.game === "entreprise" ? "entreprise" : b.game === "club" ? "club" : null;
   if (!kind) return send(400, { error: "Jeu inconnu" });
   if (!UUID.test(b.session_id || "")) return send(400, { error: "Partie invalide" });
-
+ 
   const prof = await sb("/rest/v1/profiles?id=eq." + me.id + "&select=active");
   if (!prof.ok || !prof.data || !prof.data[0] || !prof.data[0].active) return send(403, { error: "Compte inactif" });
   const ses = await sb("/rest/v1/sessions?id=eq." + b.session_id + "&owner=eq." + me.id + "&select=created_at");
   if (!ses.ok || !ses.data || !ses.data[0]) return send(403, { error: "Partie introuvable" });
   if (Date.now() - new Date(ses.data[0].created_at).getTime() > WINDOW_MIN * 60000) return send(403, { error: "Partie trop ancienne pour être personnalisée" });
-
+ 
   const team = b.team || {};
   const events = (Array.isArray(b.events) ? b.events : []).slice(0, 4).filter((e) => Number.isInteger(e.i) && e.i >= 0 && e.i < 12).map((e) => ({
     i: e.i, tag: str(e.tag, 60), title: str(e.title, 120), text: str(e.text, 900),
@@ -156,7 +171,7 @@ module.exports = async (req, res) => {
   const roles = (Array.isArray(b.roles) ? b.roles : []).slice(0, 4).map((x) => str(x, 60));
   if (!events.length || roles.length !== 4) return send(400, { error: "Demande incomplète" });
   const input = { team: { name: str(team.name, 60), count: Math.min(12, Math.max(1, Number(team.count) || 6)), profile: str(team.profile, 900), ctx: str(team.ctx, 600) }, roles, events, levers };
-
+ 
   const { sys, user } = prompt(kind, input);
   let out;
   try {
@@ -168,7 +183,7 @@ module.exports = async (req, res) => {
     if (e && (e.status >= 500 || e.name === "AbortError")) return send(503, { error: "Service momentanément indisponible" });
     return send(502, { error: "Réponse inexploitable" });
   }
-
+ 
   const okEv = [];
   (Array.isArray(out.events) ? out.events : []).forEach((e) => {
     if (!e || !events.some((x) => x.i === e.i)) return;
@@ -184,3 +199,4 @@ module.exports = async (req, res) => {
   });
   return send(200, { events: okEv, levers: okLv });
 };
+ 
