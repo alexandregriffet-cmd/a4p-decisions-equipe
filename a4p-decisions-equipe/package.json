@@ -1,0 +1,5 @@
+{
+  "name": "a4p-decisions-equipe",
+  "private": true,
+  "engines": { "node": "26.x" }
+}
