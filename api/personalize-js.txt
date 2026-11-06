@@ -58,8 +58,8 @@ function prompt(kind, b) {
   return { sys, user };
 }
 
-async function generate(provider, sys, user) {
-  const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 55000);
+async function generate(provider, sys, user, ms) {
+  const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), ms || 55000);
   const key = KEYS[provider], model = MODELS[provider];
   try {
     let r, j;
@@ -109,8 +109,21 @@ module.exports = async (req, res) => {
   const send = (c, o) => res.status(c).json(o);
   if (req.method === "GET") {
     if (!PROVIDER || !KEYS[PROVIDER]) return send(200, { provider: PROVIDER || null, cle: false });
-    try { await generate(PROVIDER, "Réponds par {\"ok\":true}", "test"); return send(200, { provider: PROVIDER, modele: MODELS[PROVIDER], cle: true, test: "ok" }); }
-    catch (e) { return send(200, { provider: PROVIDER, modele: MODELS[PROVIDER], cle: true, test: "echec", code: (e && e.status) || (e && e.name) || "?" }); }
+    const out = { provider: PROVIDER, modele: MODELS[PROVIDER], cle: true, longueur_cle: String(KEYS[PROVIDER]).length, debut_cle: String(KEYS[PROVIDER]).slice(0, 3) };
+    if (PROVIDER === "gemini") {
+      try {
+        const c = new AbortController(); const t = setTimeout(() => c.abort(), 10000);
+        const lr = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=100", { signal: c.signal, headers: { "x-goog-api-key": KEYS.gemini } });
+        clearTimeout(t);
+        out.liste_modeles = lr.status;
+        const lj = await lr.json().catch(() => ({}));
+        if (!lr.ok) out.message_google = String((lj.error && lj.error.message) || "").slice(0, 200);
+        else out.modeles_flash = (lj.models || []).map((x) => String(x.name).replace(/^models\//, "")).filter((n) => /flash/i.test(n)).slice(0, 8);
+      } catch (e) { out.liste_modeles = (e && e.name) || "erreur"; }
+    }
+    try { await generate(PROVIDER, "Réponds par {\"ok\":true}", "test", 20000); out.test = "ok"; }
+    catch (e) { out.test = "echec"; out.code = (e && e.status) || (e && e.name) || "?"; }
+    return send(200, out);
   }
   if (req.method !== "POST") return send(405, { error: "Méthode non autorisée" });
   if (!BASE || !SKEY || !PROVIDER || !KEYS[PROVIDER]) return send(500, { error: "Configuration serveur incomplète" });
@@ -171,4 +184,3 @@ module.exports = async (req, res) => {
   });
   return send(200, { events: okEv, levers: okLv });
 };
-
