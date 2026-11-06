@@ -398,6 +398,12 @@ a.ghost{text-decoration:none;display:inline-block}
 }
 .ctxq{margin-top:12px}
 .ctxq textarea{font:inherit;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);resize:vertical;min-height:80px}
+
+.jr .lect{margin-top:8px;font-size:14px;line-height:1.5;color:var(--accent-ink,#222A41);border-left:3px solid var(--accent-ink,#222A41);padding-left:10px;opacity:.9}
+.jr .lect b{font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-right:6px}
+.jr .lect{grid-column:2}
+@media (max-width:640px){.jr .lect{grid-column:1}}
+@media print{.jr .lect{grid-column:2;font-size:11px}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -945,7 +951,7 @@ function renderResult(){
 }
 
 /* ---------- bilan ---------- */
-function verdict(G){
+function verdict(G,tm){
   const {P,C,B}=G.state;
   const cnt={exig:0,cad:0,col:0,dev:0};let tot=0;
   G.hist.forEach(h=>Object.entries(h.alloc).forEach(([id,w])=>{cnt[LEV[id].fam]+=w;tot+=w;}));
@@ -956,11 +962,13 @@ function verdict(G){
   else if(P<22&&(C>=24||B>=24)){title="Une équipe où il fait bon vivre";text="Le climat est bon, mais le niveau de performance ne progresse pas. Le lien seul ne suffit pas : il faut aussi un cadre et du développement.";}
   else if(P>=26){title="Une année correcte";text="Les résultats sont au rendez-vous, mais l’équipe est fragilisée. La marge de progression se trouve du côté du collectif.";}
   else{title="Une année difficile";text="Les trois courbes restent basses. Relisez le journal des décisions : quels effets sont arrivés après coup ?";}
+  if(tm&&tm.bilan&&tm.bilan.verdict){title=esc(tm.bilan.verdict.title);text=esc(tm.bilan.verdict.text);}
   text+=' Vous avez placé <strong>'+Math.round(top[1]/tot*100)+' %</strong> de vos points dans la famille <strong>'+FAM[top[0]].name+'</strong>.';
   return {title,text,cnt,tot};
 }
 /* ---------- bilan ---------- */
 const GEN_Q=["Dans votre équipe, qui a défendu quoi selon son rôle, et qui a fini par décider ?","Quelle décision a produit un effet visible seulement plusieurs périodes plus tard ?","Si vous rejouiez l’année, quelle décision prendriez-vous plus tôt, et laquelle plus tard ?"];
+function genQ(tm){return(tm&&tm.bilan&&Array.isArray(tm.bilan.qs)&&tm.bilan.qs.length===3)?tm.bilan.qs.map(esc):GEN_Q;}
 function teamLegend(key){
   return '<div class="legend">'+S.teams.map((t,i)=>'<span style="--c:'+TC(i)+'"><i class="dsh"'+(DASH[i]?' style="border-top-style:dashed"':'')+'></i>'+esc(t.name)+' <em>'+Math.round(t.G.state[key])+'</em></span>').join("")+'</div>';
 }
@@ -978,6 +986,7 @@ function journalHTML(G,tm){
   return G.hist.map(h=>{
     const chips=h.picks.map(id=>'<span class="chip f-'+LEV[id].fam+'">'+LEV[id].n+'</span> <span>'+LEV[id].name+' ('+h.alloc[id]+' pt'+(h.alloc[id]>1?'s':'')+')</span>').join(' &nbsp; ');
     return (h.ev===0||h.ev===3||h.ev===9?'<h3 class="jph">'+EVENTS[h.ev].phase+'</h3>':'')+'<div class="jr"><div class="when"><b>P'+(h.ev+1)+' · '+EVENTS[h.ev].tag+'</b><span>'+eventTitle(h.ev,tm||{pf:{arr:0,dep:0}})+'</span></div><div><div class="chips">'+chips+'</div><div class="deltas">'+d("Perf.",h.delta.P)+d("Cohésion",h.delta.C)+d("Bien-être",h.delta.B)+'</div></div>'
+     +(tm&&tm.bilan&&tm.bilan.per&&tm.bilan.per[h.ev]?'<div class="lect"><b>Lecture</b> '+esc(tm.bilan.per[h.ev])+'</div>':'')
      +(h.notes.length?'<div class="notes">'+[...new Set(h.notes)].map(n=>'<div>'+esc(n)+'</div>').join("")+'</div>':'')+'</div>';
   }).join("");
 }
@@ -989,18 +998,18 @@ function debriefForm(ti){
   const N=S.debrief.notes;
   const ta=(k,q)=>'<label class="dq"><span>'+q+'</span><textarea rows="3" data-act="dq" data-k="'+k+'" placeholder="Réponses et décisions de l’équipe">'+esc(N[k]||"")+'</textarea></label>';
   const roles=ROLE_ORDER.map(rk=>'<details class="dsec"><summary>'+ROLES[rk].name+'</summary>'+ROLES[rk].qs.map((q,n)=>ta("t"+ti+"_"+rk+"_"+n,q)).join("")+'</details>').join("");
-  const gen=GEN_Q.map((q,n)=>ta("t"+ti+"_g_"+n,q)).join("");
+  const gen=genQ(S.teams[ti]).map((q,n)=>ta("t"+ti+"_g_"+n,q)).join("");
   return '<div class="dgen">'+gen+'</div><div class="dsecs">'+roles+'</div>';
 }
 function answersHTML(ti){
   const N=S.debrief.notes;const out=[];
-  GEN_Q.forEach((q,n)=>{const a=(N["t"+ti+"_g_"+n]||"").trim();if(a) out.push([q,a]);});
+  genQ(S.teams[ti]).forEach((q,n)=>{const a=(N["t"+ti+"_g_"+n]||"").trim();if(a) out.push([q,a]);});
   ROLE_ORDER.forEach(rk=>ROLES[rk].qs.forEach((q,n)=>{const a=(N["t"+ti+"_"+rk+"_"+n]||"").trim();if(a) out.push([ROLES[rk].name+" : "+q,a]);}));
   return out.length?out.map(([q,a])=>'<div class="pr-qa"><b>'+esc(q)+'</b><p>'+esc(a).replace(/\n/g,"<br>")+'</p></div>').join(""):'<p class="who">Débrief non renseigné pour cette équipe.</p>';
 }
 function renderFinal(){
   $restart.hidden=false;
-  const tm=S.teams[S.sel],G=tm.G,v=verdict(G),ob=objectiveResult(G);
+  const tm=S.teams[S.sel],G=tm.G,v=verdict(G,tm),ob=objectiveResult(G);
   const metrics=[["P","Performance"],["C","Cohésion"],["B","Bien-être"]];
   const seg='<div class="seg">'+metrics.map(([k,n])=>'<button type="button" data-act="metric" data-k="'+k+'" aria-pressed="'+(S.metric===k)+'">'+n+'</button>').join("")+'</div>';
   const keys='<div class="keys">'
@@ -1040,7 +1049,7 @@ function buildPrint(){
   h+='<h2>Classement des équipes</h2>'+ranking();
   h+='<div class="pr-charts">'+[["P","Performance"],["C","Cohésion"],["B","Bien-être"]].map(([k,n])=>'<div class="pr-avoid"><h3>'+n+'</h3>'+chartTeams(k)+teamLegend(k)+'</div>').join("")+'</div>';
   S.teams.forEach((tm,i)=>{
-    const G=tm.G,v=verdict(G),ob=objectiveResult(G),lt=laterText(G);
+    const G=tm.G,v=verdict(G,tm),ob=objectiveResult(G),lt=laterText(G);
     h+='<section class="pr-team"><h2><span class="pr-dot" style="background:'+TC(i)+'"></span>'+esc(tm.name)+' <small>'+tm.count+' participants · objectif : '+esc(OBJECTIVES[tm.pf.obj].short)+'</small></h2>'
      +'<p class="pr-prof">'+esc(profText(tm.pf))+'</p>'
      +'<h3>'+v.title+'</h3><p>'+v.text+'</p>'
@@ -1189,7 +1198,8 @@ function profFull(pf){
 function renderPrep(){
   $restart.hidden=true;
   const n=S.teams.length,d=S.prepDone||0;
-  $app.innerHTML='<section class="screen"><div class="loginbox" style="max-width:560px"><div class="eyebrow">Préparation de la partie</div><h1 class="st">Adaptation au contexte</h1><p class="lead" style="margin-top:10px">Les situations, les questions de chaque rôle et la description des actions sont réécrites avec le contexte de chaque équipe. Comptez 20 à 40 secondes.</p><p class="who" aria-live="polite"><b>'+d+' équipe'+(d>1?'s':'')+' sur '+n+' prête'+(d>1?'s':'')+'</b></p></div></section>';
+  const bl=S.prepKind==="bilan";
+  $app.innerHTML='<section class="screen"><div class="loginbox" style="max-width:560px"><div class="eyebrow">'+(bl?'Bilan de saison':'Préparation de la partie')+'</div><h1 class="st">'+(bl?'Rédaction du bilan':'Adaptation au contexte')+'</h1><p class="lead" style="margin-top:10px">'+(bl?'Le bilan, le journal et les questions de débrief sont rédigés avec le contexte de chaque équipe et les décisions prises. Comptez 15 à 30 secondes.':'Les situations, les questions de chaque rôle et la description des actions sont réécrites avec le contexte de chaque équipe. Comptez 20 à 40 secondes.')+'</p><p class="who" aria-live="polite"><b>'+d+' équipe'+(d>1?'s':'')+' sur '+n+' prête'+(d>1?'s':'')+'</b></p></div></section>';
 }
 async function personalizeTeam(tm,c,token){
   const roles=ROLE_ORDER.map(k=>ROLES[k].name);
@@ -1215,6 +1225,34 @@ async function personalizeTeam(tm,c,token){
   }));
   if(Object.keys(out.ev).length||Object.keys(out.lev).length) tm.perso=out;
 }
+
+async function bilanTeam(tm,c,token){
+  const G=tm.G,v=verdict(G,null),ob=objectiveResult(G);
+  const strip=s=>String(s).replace(/<[^>]*>/g,"").replace(/&[a-z]+;/g," ");
+  const periods=G.hist.map(h=>({i:h.ev,tag:EVENTS[h.ev].tag,title:strip(eventTitle(h.ev,tm)),picks:h.picks.map(id=>({name:LEV[id].name,pts:h.alloc[id]})),dP:h.delta.P,dC:h.delta.C,dB:h.delta.B}));
+  const body={game:GAME_KIND,kind:"bilan",session_id:S.sessionId,team:{name:tm.name,count:tm.count,profile:profFull(tm.pf),ctx:((c&&c.ctx)||"").trim()},periods,finale:{objectif:OBJECTIVES[tm.pf.obj].label,atteint:!!ob.ok,P:G.state.P,C:G.state.C,B:G.state.B,vtitle:strip(v.title),vtext:strip(v.text).replace(/Vous avez placé.*$/,"").trim()}};
+  const wait=ms=>new Promise(r=>setTimeout(r,ms));
+  for(let attempt=0;attempt<4;attempt++){
+    if(attempt) await wait(attempt*6000);
+    const ctl=new AbortController(),to=setTimeout(()=>ctl.abort(),75000);
+    try{
+      const r=await fetch("/api/personalize",{method:"POST",signal:ctl.signal,headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify(body)});
+      if(r.status===429||r.status===503||r.status===504) continue;
+      if(!r.ok) return;
+      const j=await r.json();
+      const per={};(j.periods||[]).forEach(p=>{per[p.i]=p.comment;});
+      if(Object.keys(per).length||j.verdict||j.questions) tm.bilan={per,verdict:j.verdict||null,qs:j.questions||null};
+      return;
+    }catch(_){} finally{clearTimeout(to);}
+  }
+}
+async function bilanAll(){
+  try{
+    const {data}=await sb.auth.getSession(); const token=data&&data.session?data.session.access_token:"";
+    if(!token||!S.sessionId) return;
+    await Promise.all(S.teams.map((tm,i)=>{if(tm.bilan||tm.bilanTried) return null;tm.bilanTried=true;return bilanTeam(tm,S.cfg[i]||{},token);}));
+  }catch(_){}
+}
 async function personalizeAll(){
   S.persoNote="";
   try{
@@ -1229,7 +1267,7 @@ async function personalizeAll(){
   await save();
 }
 
-document.addEventListener("click",e=>{
+document.addEventListener("click",async e=>{
   const t=e.target.closest("[data-act]");
   if(!t||t.tagName==="INPUT"||t.tagName==="SELECT"||t.tagName==="TEXTAREA") return;
   const a=t.dataset.act;
@@ -1251,8 +1289,16 @@ document.addEventListener("click",e=>{
     if(!S.teams.every(x=>allocSum(x.G.alloc)===3)) return;
     S.teams.forEach(x=>{step(x.G,x.G.alloc);x.G.alloc={};});
     S.phase="result";render();goTop();save();
+    if(CLOUD&&S.teams[0].G.period>=NP) S.bilanP=bilanAll();
   }else if(a==="next"){
-    S.phase=S.teams[0].G.period>=NP?"final":"play";render();goTop();save();
+    if(S.teams[0].G.period>=NP){
+      if(CLOUD&&S.teams.some(x=>!x.bilan&&!x.bilanTried||S.bilanP)){
+        S.prepKind="bilan";S.phase="prep";render();goTop();
+        try{await (S.bilanP||bilanAll());}catch(_){}
+        S.bilanP=null;S.prepKind="";
+      }
+      S.phase="final";render();goTop();save();
+    }else{S.phase="play";render();goTop();save();}
   }else if(a==="metric"){S.metric=t.dataset.k;keep(render);}
   else if(a==="print"){printNow();}
   else if(a==="again"){startGame();render();goTop();}
