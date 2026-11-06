@@ -10,7 +10,7 @@ const SKEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const E = process.env;
 const PROVIDER = E.AI_PROVIDER || (E.GEMINI_API_KEY ? "gemini" : E.MISTRAL_API_KEY ? "mistral" : E.ANTHROPIC_API_KEY ? "anthropic" : "");
 const KEYS = { gemini: E.GEMINI_API_KEY, mistral: E.MISTRAL_API_KEY, anthropic: E.ANTHROPIC_API_KEY };
-const MODELS = { gemini: E.GEMINI_MODEL || "gemini-3.8", mistral: E.MISTRAL_MODEL || "mistral-small-latest", anthropic: E.ANTHROPIC_MODEL || "claude-sonnet-5-5" };
+const MODELS = { gemini: E.GEMINI_MODEL || "gemini-3-flash-preview", mistral: E.MISTRAL_MODEL || "mistral-small-latest", anthropic: E.ANTHROPIC_MODEL || "claude-sonnet-5-5" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const WINDOW_MIN = 20;
 
@@ -66,11 +66,13 @@ async function generate(provider, sys, user, ms) {
     if (provider === "gemini") {
       const gc = { temperature: 0.7, maxOutputTokens: 8000, responseMimeType: "application/json" };
       if (/2\.5/.test(model)) gc.thinkingConfig = { thinkingBudget: 0 };
+      else if (/gemini-3/.test(model)) gc.thinkingConfig = { thinkingLevel: "low" };
       const call = (m) => fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(m) + ":generateContent", {
         method: "POST", signal: ctl.signal, headers: { "x-goog-api-key": key, "content-type": "application/json" },
         body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig: gc }),
       });
       r = await call(MODELS.gemini);
+      if (r.status === 400 && gc.thinkingConfig) { delete gc.thinkingConfig; r = await call(MODELS.gemini); }
       if ((r.status === 404 || r.status === 400) && !E.GEMINI_MODEL) {
         // modèle retiré : Google indique souvent le modèle de remplacement dans son message
         const bad = await r.json().catch(() => ({}));
@@ -81,8 +83,9 @@ async function generate(provider, sys, user, ms) {
         const lr = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { signal: ctl.signal, headers: { "x-goog-api-key": key } });
         if (lr.ok) {
           const names = (((await lr.json()).models) || []).filter((x) => (x.supportedGenerationMethods || []).includes("generateContent")).map((x) => String(x.name).replace(/^models\//, ""))
-            .filter((n) => /flash/i.test(n) && !/(lite|preview|exp|thinking|image|tts|live|audio|vision|8b|latest-)/i.test(n) && n !== MODELS.gemini);
-          names.sort((a, b) => (parseFloat((b.match(/(\d+(\.\d+)?)/) || [0])[0]) - parseFloat((a.match(/(\d+(\.\d+)?)/) || [0])[0])));
+            .filter((n) => /flash/i.test(n) && !/(lite|exp|thinking|image|tts|live|audio|vision|8b|latest)/i.test(n) && n !== MODELS.gemini);
+          const num = (n) => parseFloat((n.match(/(\d+(\.\d+)?)/) || [0])[0]);
+          names.sort((a, b) => (/preview/i.test(a) - /preview/i.test(b)) || (num(b) - num(a)));
           for (const n of names.slice(0, 3)) { r = await call(n); if (r.ok) { MODELS.gemini = n; break; } }
         }
       }
@@ -138,7 +141,7 @@ module.exports = async (req, res) => {
           return { m, json: avecJson, think: avecThink, statut: r.status, ms: Date.now() - t0, msg: r.ok ? undefined : String((j.error && j.error.message) || "").slice(0, 120) };
         } catch (e) { return { m, json: avecJson, think: avecThink, statut: (e && e.name) || "erreur", ms: Date.now() - t0 }; } finally { clearTimeout(t); }
       };
-      out.essais = await Promise.all([essai("gemini-3.8", false, false), essai("gemini-3.8", true, false), essai("gemini-3-flash-preview", false, false)]);
+      out.essais = await Promise.all([essai("gemini-3-flash-preview", false, false), essai("gemini-3-flash-preview", true, false), essai("gemini-3.1-flash-lite-preview", false, false)]);
       return send(200, out);
     }
     try { await generate(PROVIDER, "Réponds par {\"ok\":true}", "test", 20000); out.test = "ok"; }
