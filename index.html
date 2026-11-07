@@ -404,6 +404,15 @@ a.ghost{text-decoration:none;display:inline-block}
 .jr .lect{grid-column:2}
 @media (max-width:640px){.jr .lect{grid-column:1}}
 @media print{.jr .lect{grid-column:2;font-size:11px}}
+
+.alea{margin:14px 0;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--ball);border-radius:8px;background:var(--surface)}
+.alea.bon{border-left-color:#2E8B57}
+.alea.mal{border-left-color:#C0392B}
+.alea .eyebrow{margin-bottom:4px}
+.alea b{display:block;font-size:17px;color:var(--accent-ink,var(--chalk))}
+.alea p{margin:6px 0 0;line-height:1.5}
+.alea small{display:block;margin-top:6px;color:var(--muted);font-size:13px}
+.alea .deltas{margin-top:8px}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -567,6 +576,23 @@ const DYNS={
 };
 const DIFF_EV={tensions:[2],jeune:[1,10],budget:[8,9],benevoles:[4],resultats:[3],comm:[0,9],calendrier:[7]};
 const FORCE_EV={esprit:[2,7],formation:[1,10],staff:[3,11],soutien:[3,4],moyens:[8,9],technique:[6],direction:[0,9]};
+
+const ALEAS=[
+  {id:"client",title:"Un client important réduit son périmètre",text:"Un grand client annonce qu’il réduit son périmètre pour l’année. Le plan de charge se tend et les discussions sur la répartition du travail reprennent.",eff:[-4,0,-1],soft:["RT","CO"]},
+  {id:"expert",title:"Un expert clé annonce son départ",text:"Un expert que tout le monde sollicitait donne sa démission. Chacun se demande qui reprendra ses dossiers.",eff:[-2,-3,-1],soft:["CO","PC"]},
+  {id:"rumeur",title:"Une rumeur de réorganisation",text:"Une rumeur de réorganisation circule dans les couloirs avant toute annonce officielle. Les conversations changent de ton.",eff:[0,-3,-2],soft:["RI","RT"]},
+  {id:"budget",title:"Gel d’une partie du budget",text:"La direction gèle une partie du budget formation et déplacements. Plusieurs projets sont mis en attente.",eff:[-2,0,-3],soft:["RT","RP"]},
+  {id:"outil",title:"Panne d’un outil critique",text:"L’outil de suivi utilisé par toute l’équipe tombe pendant plusieurs jours. Les livrables prennent du retard.",eff:[-3,-1,0],soft:["SP","CQ"]},
+  {id:"absences",title:"Une vague d’absences",text:"Une épidémie saisonnière et plusieurs congés imprévus réduisent l’équipe d’un tiers pendant deux semaines.",eff:[-3,-1,-2],soft:["CO","CQ"]},
+  {id:"desaccord",title:"Un désaccord remonte à la direction",text:"Un désaccord entre deux managers sur une priorité est remonté jusqu’à la direction. Chacun prend parti.",eff:[0,-4,-1],soft:["RP","RI"]},
+  {id:"pic",title:"Un pic de charge imprévu",text:"Une demande urgente de la direction tombe en pleine période chargée. Les soirées s’allongent.",eff:[-1,0,-4],soft:["DP","RI"]},
+  {id:"salue",title:"Un projet est salué par la direction",text:"Un projet de l’équipe est cité en exemple en comité de direction. La fierté se voit dans les couloirs.",eff:[2,2,3],soft:[]},
+  {id:"nouveauclient",title:"Un nouveau client confie un dossier",text:"Un client conquis par une présentation confie un premier dossier à l’équipe. L’énergie remonte.",eff:[4,1,1],soft:[]},
+  {id:"recrue",title:"Une recrue s’intègre très vite",text:"Un nouvel arrivant apporte une méthode qui plaît. Les anciens l’adoptent sans résistance.",eff:[2,3,0],soft:[]},
+  {id:"sponsor",title:"Un sponsor de direction s’engage",text:"Un membre du comité de direction vient à la réunion d’équipe et s’engage sur les moyens.",eff:[1,1,3],soft:[]},
+  {id:"prix",title:"Une reconnaissance interne",text:"L’équipe reçoit un prix interne pour la qualité de son travail collectif.",eff:[1,2,3],soft:[]},
+  {id:"calme",title:"Une période plus calme",text:"Peu de demandes urgentes ce mois-ci. L’équipe respire et avance enfin sur le fond.",eff:[3,0,2],soft:[]}
+];
 const DEV_IDS=["DC","PC","RP","RI"];
 function defaultProfile(){return {obj:"milieu",forces:[],diffs:[],arr:5,dep:4,dyn:"stable"};}
 function neutralProfile(){return {obj:"milieu",forces:[],diffs:[],arr:3,dep:3,dyn:"stable"};}
@@ -588,6 +614,30 @@ function startOf(pf){
 
 const PRESS=["AO","CQ","SR"];
 const E_P=2.1, E_CB=1.1;
+
+function drawAleas(){
+  if(!ALEAS.length) return [];
+  const nb=3+(Math.random()<0.5?1:0);
+  const nbBonus=nb===4?2:(Math.random()<0.5?1:2);
+  const isBonus=a=>a.eff.reduce((s,v)=>s+v,0)>0;
+  const pick=(arr,n)=>{const c=[...arr];const out=[];while(out.length<n&&c.length){out.push(c.splice(Math.floor(Math.random()*c.length),1)[0]);}return out;};
+  for(let t=0;t<400;t++){
+    const ps=pick([1,2,3,4,5,6,7,8,9,10],nb).sort((a,b)=>a-b);
+    if(ps.some((x,i)=>i&&x-ps[i-1]<2)) continue;
+    const chosen=pick(ALEAS.filter(isBonus),nbBonus).concat(pick(ALEAS.filter(a=>!isBonus(a)),nb-nbBonus));
+    if(chosen.length<nb) continue;
+    const tot=[0,0,0];chosen.forEach(a=>a.eff.forEach((v,i)=>{tot[i]+=v;}));
+    if(tot.some(v=>Math.abs(v)>8)) continue;
+    const order=pick(chosen,nb);
+    return ps.map((at,i)=>({at,id:order[i].id}));
+  }
+  return [];
+}
+function aleaAt(G,p){
+  const al=(G.aleas||[]).find(a=>a.at===p);
+  return al?ALEAS.find(x=>x.id===al.id)||null:null;
+}
+
 
 function newGame(pf){
   pf=pf||neutralProfile();
@@ -658,6 +708,17 @@ function step(G,alloc){
 
   const dim=(v,x)=>x>0?x*Math.max(0.25,1-Math.max(0,v-20)/34):x;
   const n={P:before.P+dim(before.P,d[0])+coup-E_P,C:before.C+dim(before.C,d[1])-E_CB,B:before.B+dim(before.B,d[2])-(E_CB+0.15*OBJECTIVES[pf.obj].press)};
+  let alea=null;
+  const A=aleaAt(G,p);
+  if(A){
+    const by=A.soft.filter(id=>recentIds.has(id));
+    const eff=A.eff.map(v=>v<0&&by.length?v*0.5:v);
+    n.P+=eff[0];n.C+=eff[1];n.B+=eff[2];
+    alea={id:A.id,title:A.title,eff,by:by.map(id=>LEV[id].name),raw:A.eff};
+    const fmt=(l,v)=>v?l+" "+(v>0?"+":"")+String(Math.round(v*10)/10).replace(".",","):"";
+    const txt=[fmt("performance",eff[0]),fmt("cohésion",eff[1]),fmt("bien-être",eff[2])].filter(Boolean).join(", ");
+    notes.push("Aléa « "+A.title+" » : "+txt+(by.length&&A.eff.some(v=>v<0)?" (malus réduit de moitié grâce à « "+by[0]+" »)":"")+".");
+  }
   if(p===NP-1){
     const avg=(clamp(n.C)+clamp(n.B))/2;
     if(avg>=26){n.P+=3;notes.push("Dernières échéances : une équipe unie et en forme tient la distance.");}
@@ -665,7 +726,7 @@ function step(G,alloc){
   }
   const after={P:r1(clamp(n.P)),C:r1(clamp(n.C)),B:r1(clamp(n.B))};
   const delta={P:r1(after.P-before.P),C:r1(after.C-before.C),B:r1(after.B-before.B)};
-  G.hist.push({picks:ids,alloc:{...alloc},before,after,delta,notes,ev:p});
+  G.hist.push({picks:ids,alloc:{...alloc},before,after,delta,notes,ev:p,alea});
   G.state=after;
   G.series.P.push(after.P);G.series.C.push(after.C);G.series.B.push(after.B);
   G.period=p+1;
@@ -892,6 +953,19 @@ function renderBrief(){
 }
 
 /* ---------- décisions ---------- */
+function aleaPlay(G,p){
+  const A=aleaAt(G,p); if(!A) return "";
+  return '<div class="alea" role="note"><div class="eyebrow">Aléa de la période</div><b>'+esc(A.title)+'</b><p>'+esc(A.text)+'</p><small>Ses effets se verront dans les résultats. Certaines décisions peuvent en atténuer les conséquences.</small></div>';
+}
+function aleaRes(h){
+  const a=h.alea; if(!a) return "";
+  const dl=(n,d)=>d?'<span class="dl '+cls(d)+'">'+n+' '+sg(d)+'</span>':'';
+  const bon=a.eff.reduce((s,v)=>s+v,0)>0;
+  const A=aleaAt({aleas:[{at:h.ev,id:a.id}]},h.ev);
+  return '<div class="alea '+(bon?'bon':'mal')+'" role="note"><div class="eyebrow">Aléa de la période</div><b>'+esc(a.title)+'</b>'+(A?'<p>'+esc(A.text)+'</p>':'')
+   +'<div class="deltas">'+dl("Performance",a.eff[0])+dl("Cohésion",a.eff[1])+dl("Bien-être",a.eff[2])+'</div>'
+   +(a.by.length&&a.raw.some(v=>v<0)?'<small>Malus réduit de moitié grâce à « '+esc(a.by[0])+' ».</small>':(a.raw.some(v=>v<0)?'<small>Aucune décision récente n’a atténué ce malus.</small>':''))+'</div>';
+}
 function renderPlay(){
   $restart.hidden=false;
   const tm=S.teams[S.sel], G=tm.G, p=G.period, ev=EVENTS[p];
@@ -915,6 +989,7 @@ function renderPlay(){
   $app.innerHTML='<section class="screen">'+prog
    +'<div class="phead"><div><div class="eyebrow">'+phaseLabel(p)+' · période '+(p+1)+' sur '+NP+'</div><h2>'+eventTitle(p,tm)+'</h2></div>'+gauges(G.state)+'</div>'
    +'<div class="scene"><p>'+eventText(p,tm)+'</p></div>'
+   +aleaPlay(G,p)
    +tabs("play")
    +'<p class="who" style="margin-top:10px"><b>Profil de '+esc(tm.name)+' :</b> '+esc(profText(tm.pf))+'</p>'
    +'<div class="lens" aria-label="Ce que chaque rôle se demande">'+lens+'</div>'
@@ -943,6 +1018,7 @@ function renderResult(){
   $app.innerHTML='<section class="screen">'+strip(G.period)
    +'<div class="phead"><div><div class="eyebrow">'+phaseLabel(i)+' · période '+(i+1)+' sur '+NP+'</div><h2 style="color:var(--accent-ink)">Résultats de la période</h2></div></div>'
    +tabs("result")
+   +aleaRes(h)
    +'<div class="res"><div><div class="eyebrow">'+esc(tm.name)+'</div><p class="who" style="margin-top:4px">Décisions : '+esc(picked)+'</p>'
    +'<div class="voices">'+q("P","P","v-p",sp[0])+q("C","C","v-c",sp[1])+q("W","B","v-w",sp[2])+'</div></div>'
    +'<div><div class="chartbox">'+chart(G.series,false)+legend(G.state)+'<div class="deltas">'+dl("Performance",h.delta.P)+dl("Cohésion",h.delta.C)+dl("Bien-être",h.delta.B)+'</div></div></div></div>'
@@ -1174,7 +1250,8 @@ function render(msg){
   return renderFinal();
 }
 function startGame(){
-  S.teams=S.cfg.map(c=>{const pf=JSON.parse(JSON.stringify(c.pf));return {name:(c.name||"").trim()||"Équipe",count:c.count,pf,G:newGame(pf)};});
+  const AL=drawAleas();
+  S.teams=S.cfg.map(c=>{const pf=JSON.parse(JSON.stringify(c.pf));return {name:(c.name||"").trim()||"Équipe",count:c.count,pf,G:(()=>{const g=newGame(pf);g.aleas=AL;return g;})()};});
   S.sel=0;S.phase="brief";S.showRef=false;S.metric="P";S.debrief={notes:{},synth:"",actions:["","",""]};
 }
 async function launch(btn){
@@ -1229,7 +1306,7 @@ async function personalizeTeam(tm,c,token){
 async function bilanTeam(tm,c,token){
   const G=tm.G,v=verdict(G,null),ob=objectiveResult(G);
   const strip=s=>String(s).replace(/<[^>]*>/g,"").replace(/&[a-z]+;/g," ");
-  const periods=G.hist.map(h=>({i:h.ev,tag:EVENTS[h.ev].tag,title:strip(eventTitle(h.ev,tm)),picks:h.picks.map(id=>({name:LEV[id].name,pts:h.alloc[id]})),dP:h.delta.P,dC:h.delta.C,dB:h.delta.B}));
+  const periods=G.hist.map(h=>({i:h.ev,tag:EVENTS[h.ev].tag,title:strip(eventTitle(h.ev,tm)),picks:h.picks.map(id=>({name:LEV[id].name,pts:h.alloc[id]})),dP:h.delta.P,dC:h.delta.C,dB:h.delta.B,alea:h.alea?h.alea.title:undefined}));
   const body={game:GAME_KIND,kind:"bilan",session_id:S.sessionId,team:{name:tm.name,count:tm.count,profile:profFull(tm.pf),ctx:((c&&c.ctx)||"").trim()},periods,finale:{objectif:OBJECTIVES[tm.pf.obj].label,atteint:!!ob.ok,P:G.state.P,C:G.state.C,B:G.state.B,vtitle:strip(v.title),vtext:strip(v.text).replace(/Vous avez placé.*$/,"").trim()}};
   const wait=ms=>new Promise(r=>setTimeout(r,ms));
   for(let attempt=0;attempt<4;attempt++){
