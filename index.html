@@ -714,10 +714,11 @@ function step(G,alloc){
     const by=A.soft.filter(id=>recentIds.has(id));
     const eff=A.eff.map(v=>v<0&&by.length?v*0.5:v);
     n.P+=eff[0];n.C+=eff[1];n.B+=eff[2];
-    alea={id:A.id,title:A.title,eff,by:by.map(id=>LEV[id].name),raw:A.eff};
+    const AT=(G.alp&&G.alp[A.id]&&G.alp[A.id].title)||A.title;
+    alea={id:A.id,title:AT,eff,by:by.map(id=>LEV[id].name),raw:A.eff};
     const fmt=(l,v)=>v?l+" "+(v>0?"+":"")+String(Math.round(v*10)/10).replace(".",","):"";
     const txt=[fmt("performance",eff[0]),fmt("cohésion",eff[1]),fmt("bien-être",eff[2])].filter(Boolean).join(", ");
-    notes.push("Aléa « "+A.title+" » : "+txt+(by.length&&A.eff.some(v=>v<0)?" (malus réduit de moitié grâce à « "+by[0]+" »)":"")+".");
+    notes.push("Aléa « "+AT+" » : "+txt+(by.length&&A.eff.some(v=>v<0)?" (malus réduit de moitié grâce à « "+by[0]+" »)":"")+".");
   }
   if(p===NP-1){
     const avg=(clamp(n.C)+clamp(n.B))/2;
@@ -955,13 +956,15 @@ function renderBrief(){
 /* ---------- décisions ---------- */
 function aleaPlay(G,p){
   const A=aleaAt(G,p); if(!A) return "";
-  return '<div class="alea" role="note"><div class="eyebrow">Aléa de la période</div><b>'+esc(A.title)+'</b><p>'+esc(A.text)+'</p><small>Ses effets se verront dans les résultats. Certaines décisions peuvent en atténuer les conséquences.</small></div>';
+  const T=(G.alp&&G.alp[A.id])||A;
+  return '<div class="alea" role="note"><div class="eyebrow">Aléa de la période</div><b>'+esc(T.title)+'</b><p>'+esc(T.text)+'</p><small>Ses effets se verront dans les résultats. Certaines décisions peuvent en atténuer les conséquences.</small></div>';
 }
-function aleaRes(h){
+function aleaRes(h,G){
   const a=h.alea; if(!a) return "";
   const dl=(n,d)=>d?'<span class="dl '+cls(d)+'">'+n+' '+sg(d)+'</span>':'';
   const bon=a.eff.reduce((s,v)=>s+v,0)>0;
-  const A=aleaAt({aleas:[{at:h.ev,id:a.id}]},h.ev);
+  const A0=aleaAt({aleas:[{at:h.ev,id:a.id}]},h.ev);
+  const A=(G&&G.alp&&G.alp[a.id])||A0;
   return '<div class="alea '+(bon?'bon':'mal')+'" role="note"><div class="eyebrow">Aléa de la période</div><b>'+esc(a.title)+'</b>'+(A?'<p>'+esc(A.text)+'</p>':'')
    +'<div class="deltas">'+dl("Performance",a.eff[0])+dl("Cohésion",a.eff[1])+dl("Bien-être",a.eff[2])+'</div>'
    +(a.by.length&&a.raw.some(v=>v<0)?'<small>Malus réduit de moitié grâce à « '+esc(a.by[0])+' ».</small>':(a.raw.some(v=>v<0)?'<small>Aucune décision récente n’a atténué ce malus.</small>':''))+'</div>';
@@ -1018,7 +1021,7 @@ function renderResult(){
   $app.innerHTML='<section class="screen">'+strip(G.period)
    +'<div class="phead"><div><div class="eyebrow">'+phaseLabel(i)+' · période '+(i+1)+' sur '+NP+'</div><h2 style="color:var(--accent-ink)">Résultats de la période</h2></div></div>'
    +tabs("result")
-   +aleaRes(h)
+   +aleaRes(h,G)
    +'<div class="res"><div><div class="eyebrow">'+esc(tm.name)+'</div><p class="who" style="margin-top:4px">Décisions : '+esc(picked)+'</p>'
    +'<div class="voices">'+q("P","P","v-p",sp[0])+q("C","C","v-c",sp[1])+q("W","B","v-w",sp[2])+'</div></div>'
    +'<div><div class="chartbox">'+chart(G.series,false)+legend(G.state)+'<div class="deltas">'+dl("Performance",h.delta.P)+dl("Cohésion",h.delta.C)+dl("Bien-être",h.delta.B)+'</div></div></div></div>'
@@ -1281,8 +1284,9 @@ function renderPrep(){
 async function personalizeTeam(tm,c,token){
   const roles=ROLE_ORDER.map(k=>ROLES[k].name);
   const evs=EVENTS.map((e,i)=>({i,tag:e.tag,title:eventTitle(i,tm),text:eventText(i,tm),lens:e.lens}));
-  const parts=[[0,1,2,3],[4,5,6,7],[8,9,10,11]].map((idx,k)=>({part:k,events:idx.map(i=>evs[i]),levers:k===0?LEVERS.map(l=>({id:l.id,name:l.name,desc:l.desc})):[]}));
-  const out={ev:{},lev:{}};
+  const ales=(tm.G.aleas||[]).map(x=>ALEAS.find(a=>a.id===x.id)).filter(Boolean).map(a=>({id:a.id,title:a.title,text:a.text,nature:a.eff.reduce((s,v)=>s+v,0)>0?"favorable":"défavorable"}));
+  const parts=[[0,1,2,3],[4,5,6,7],[8,9,10,11]].map((idx,k)=>({part:k,events:idx.map(i=>evs[i]),levers:k===0?LEVERS.map(l=>({id:l.id,name:l.name,desc:l.desc})):[],aleas:k===0?ales:[]}));
+  const out={ev:{},lev:{},al:{}};
   const wait=ms=>new Promise(r=>setTimeout(r,ms));
   await Promise.all(parts.map(async p=>{
     for(let attempt=0;attempt<4;attempt++){
@@ -1290,17 +1294,19 @@ async function personalizeTeam(tm,c,token){
       const ctl=new AbortController(),to=setTimeout(()=>ctl.abort(),75000);
       try{
         const r=await fetch("/api/personalize",{method:"POST",signal:ctl.signal,headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},
-          body:JSON.stringify({game:GAME_KIND,session_id:S.sessionId,roles,team:{name:tm.name,count:tm.count,profile:profFull(tm.pf),ctx:(c.ctx||"").trim()},events:p.events,levers:p.levers})});
+          body:JSON.stringify({game:GAME_KIND,session_id:S.sessionId,roles,team:{name:tm.name,count:tm.count,profile:profFull(tm.pf),ctx:(c.ctx||"").trim()},events:p.events,levers:p.levers,aleas:p.aleas})});
         if(r.status===429||r.status===503||r.status===504) continue;
         if(!r.ok) return;
         const j=await r.json();
         (j.events||[]).forEach(e=>{out.ev[e.i]={title:e.title,text:e.text,lens:e.lens};});
         (j.levers||[]).forEach(l=>{out.lev[l.id]=l.desc;});
+        (j.aleas||[]).forEach(a=>{out.al[a.id]={title:a.title,text:a.text};});
         return;
       }catch(_){} finally{clearTimeout(to);}
     }
   }));
   if(Object.keys(out.ev).length||Object.keys(out.lev).length) tm.perso=out;
+  if(Object.keys(out.al).length) tm.G.alp=out.al;
 }
 
 async function bilanTeam(tm,c,token){
